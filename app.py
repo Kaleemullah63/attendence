@@ -1,143 +1,135 @@
-import streamlit as st
-import face_recognition
 import cv2
-import numpy as np
-import sqlite3
 import os
-from datetime import datetime
+import numpy as np
 import pandas as pd
+import streamlit as st
+from datetime import datetime
 
-# ---------------- CONFIG ----------------
-st.set_page_config(page_title="AI Smart Attendance", layout="wide")
+# --- Directories ---
+DATA_DIR = "faces"
+MODEL_FILE = "face_model.yml"
+ATTENDANCE_FILE = "attendance.csv"
 
-# ---------------- DATABASE ----------------
-conn = sqlite3.connect("attendance.db", check_same_thread=False)
-cursor = conn.cursor()
+os.makedirs(DATA_DIR, exist_ok=True)
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS students (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    student_id TEXT UNIQUE,
-    image_path TEXT
-)
-""")
+# --- Streamlit UI ---
+st.title("Face Recognition Attendance System")
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS attendance (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    student_id TEXT,
-    date TEXT,
-    time TEXT
-)
-""")
-conn.commit()
+menu = ["Register User", "Mark Attendance", "View Attendance"]
+choice = st.sidebar.selectbox("Menu", menu)
 
-# ---------------- FOLDER ----------------
-if not os.path.exists("known_faces"):
-    os.makedirs("known_faces")
+# --- Helper Functions ---
+def capture_faces(user_id, user_name):
+    cam = cv2.VideoCapture(0)
+    detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    count = 0
+    st.info("Look at the camera...")
 
-# ---------------- LOAD FACES ----------------
-def load_known_faces():
-    encodings = []
-    data = []
-    for file in os.listdir("known_faces"):
-        path = os.path.join("known_faces", file)
-        image = face_recognition.load_image_file(path)
-        enc = face_recognition.face_encodings(image)
-        if enc:
-            encodings.append(enc[0])
-            student_id = file.split("_")[0]
-            cursor.execute("SELECT name FROM students WHERE student_id=?", (student_id,))
-            result = cursor.fetchone()
-            if result:
-                data.append((result[0], student_id))
-    return encodings, data
+    while count < 20:
+        ret, frame = cam.read()
+        if not ret:
+            st.error("Failed to access camera")
+            break
 
-# ---------------- REGISTER ----------------
-def register_student(name, student_id, image):
-    file_path = f"known_faces/{student_id}_{name}.jpg"
-    cv2.imwrite(file_path, image)
-    cursor.execute(
-        "INSERT INTO students (name, student_id, image_path) VALUES (?, ?, ?)",
-        (name, student_id, file_path)
-    )
-    conn.commit()
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = detector.detectMultiScale(gray, 1.3, 5)
 
-# ---------------- MARK ATTENDANCE ----------------
-def mark_attendance(name, student_id):
-    now = datetime.now()
-    date = now.strftime("%Y-%m-%d")
-    time = now.strftime("%H:%M:%S")
-    cursor.execute(
-        "SELECT * FROM attendance WHERE student_id=? AND date=?",
-        (student_id, date)
-    )
-    if cursor.fetchone():
-        return "Already marked today"
-    cursor.execute(
-        "INSERT INTO attendance (name, student_id, date, time) VALUES (?, ?, ?, ?)",
-        (name, student_id, date, time)
-    )
-    conn.commit()
-    return "Attendance Marked Successfully"
+        for (x, y, w, h) in faces:
+            count += 1
+            face_img = gray[y:y+h, x:x+w]
+            cv2.imwrite(f"{DATA_DIR}/{user_id}_{count}.jpg", face_img)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
 
-# ---------------- API KEY ----------------
-# 🔑 PASTE YOUR API KEY HERE
-GROQ_API_KEY = "API_KEY"
+        cv2.imshow("Registering Face", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-# ---------------- UI ----------------
-st.title("🎓 AI Smart Attendance System")
+    cam.release()
+    cv2.destroyAllWindows()
+    st.success(f"Captured {count} face images for {user_name}")
 
-menu = st.sidebar.selectbox(
-    "Menu",
-    ["Register Student", "Mark Attendance", "Dashboard"]
-)
+def train_model():
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    faces, ids = [], []
 
-# ================= REGISTER =================
-if menu == "Register Student":
-    st.subheader("Register New Student")
-    name = st.text_input("Student Name")
-    student_id = st.text_input("Student ID")
-    camera_image = st.camera_input("Take Student Photo")
-    if camera_image is not None and st.button("Register"):
-        image = np.array(bytearray(camera_image.read()), dtype=np.uint8)
-        image = cv2.imdecode(image, 1)
-        register_student(name, student_id, image)
-        st.success("Student Registered Successfully")
+    for file in os.listdir(DATA_DIR):
+        path = os.path.join(DATA_DIR, file)
+        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        user_id = int(file.split("_")[0])
+        faces.append(img)
+        ids.append(user_id)
 
-# ================= MARK ATTENDANCE =================
-elif menu == "Mark Attendance":
-    st.subheader("Camera Attendance")
-    camera_image = st.camera_input("Scan Your Face")
-    if camera_image is not None:
-        image = np.array(bytearray(camera_image.read()), dtype=np.uint8)
-        image = cv2.imdecode(image, 1)
-        known_encodings, known_data = load_known_faces()
-        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        face_locations = face_recognition.face_locations(rgb)
-        face_encodings = face_recognition.face_encodings(rgb, face_locations)
-        for encoding in face_encodings:
-            matches = face_recognition.compare_faces(known_encodings, encoding)
-            distances = face_recognition.face_distance(known_encodings, encoding)
-            if len(distances) > 0:
-                best_match = np.argmin(distances)
-                if matches[best_match]:
-                    name, student_id = known_data[best_match]
-                    st.success(f"Recognized: {name}")
-                    st.info(f"Student ID: {student_id}")
-                    status = mark_attendance(name, student_id)
-                    st.success(status)
-                    break
+    if faces:
+        recognizer.train(faces, np.array(ids))
+        recognizer.write(MODEL_FILE)
+        st.success("Model trained successfully!")
+
+def mark_attendance():
+    if not os.path.exists(MODEL_FILE):
+        st.warning("No trained model found. Register users first!")
+        return
+
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer.read(MODEL_FILE)
+    detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    cam = cv2.VideoCapture(0)
+    st.info("Press 'q' to exit camera after recognition")
+
+    while True:
+        ret, frame = cam.read()
+        if not ret:
+            st.error("Failed to access camera")
+            break
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = detector.detectMultiScale(gray, 1.3, 5)
+
+        for (x, y, w, h) in faces:
+            face_img = gray[y:y+h, x:x+w]
+            user_id, conf = recognizer.predict(face_img)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            cv2.putText(frame, f"ID: {user_id}", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
+
+            # Mark attendance
+            now = datetime.now()
+            date_str = now.strftime("%Y-%m-%d")
+            time_str = now.strftime("%H:%M:%S")
+            df = pd.DataFrame()
+            if os.path.exists(ATTENDANCE_FILE):
+                df = pd.read_csv(ATTENDANCE_FILE)
+            df = df.append({"ID": user_id, "Date": date_str, "Time": time_str}, ignore_index=True)
+            df.to_csv(ATTENDANCE_FILE, index=False)
+            st.success(f"Attendance marked for ID: {user_id}")
+
+        cv2.imshow("Attendance", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cam.release()
+    cv2.destroyAllWindows()
+
+# --- Menu Actions ---
+if choice == "Register User":
+    st.subheader("Register New User")
+    user_name = st.text_input("Name")
+    user_id = st.text_input("ID")
+
+    if st.button("Capture Face"):
+        if user_name and user_id:
+            capture_faces(user_id, user_name)
+            train_model()
         else:
-            st.error("Face Not Recognized")
+            st.warning("Please enter Name and ID")
 
-# ================= DASHBOARD =================
-elif menu == "Dashboard":
-    st.subheader("Attendance Dashboard")
-    df = pd.read_sql_query("SELECT * FROM attendance", conn)
-    if df.empty:
-        st.warning("No attendance yet")
-    else:
+elif choice == "Mark Attendance":
+    st.subheader("Mark Attendance")
+    if st.button("Start Camera"):
+        mark_attendance()
+
+elif choice == "View Attendance":
+    st.subheader("Attendance Records")
+    if os.path.exists(ATTENDANCE_FILE):
+        df = pd.read_csv(ATTENDANCE_FILE)
         st.dataframe(df)
+    else:
+        st.info("No attendance records found yet")
