@@ -2,7 +2,6 @@ streamlit
 face_recognition
 opencv-python
 easyocr
-pyngrok
 pandas
 matplotlib
 pillow
