@@ -1,8 +1,23 @@
-streamlit
-face_recognition
-opencv-python
-easyocr
-pandas
-matplotlib
-pillow
-numpy
+# Streamlit for the web app
+streamlit==1.54.0
+
+# OpenCV for image/video handling
+opencv-python==4.13.0.92
+
+# EasyOCR for text recognition
+easyocr==1.7.2
+
+# Pandas for attendance data
+pandas==2.3.3
+
+# Matplotlib for visualization
+matplotlib==3.10.8
+
+# Pillow for image processing
+Pillow==12.1.1
+
+# Numpy for numerical operations
+numpy==2.4.2
+
+# Alternative to face_recognition to avoid dlib compilation
+face-recognition-lite==0.2.0
