@@ -1,23 +1,5 @@
-# Streamlit
-streamlit>=1.20.0
-
-# Computer vision / face detection / OCR
-opencv-python-headless
-face-recognition
-easyocr
-
-# Data handling
-pandas
-numpy
-
-# Plotting / visualization
-matplotlib
-altair
-
-# Image handling
-Pillow
-
-# Optional: for better dependency management
-scikit-image
-scipy
-python-dateutil
+streamlit==1.24.0
+opencv-python-headless==4.13.0.92
+pillow==12.1.1
+numpy==2.4.2
+pandas==2.3.3
